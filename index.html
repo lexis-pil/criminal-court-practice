@@ -40,6 +40,9 @@ button:disabled{opacity:.4;cursor:default}
 .tabs{display:flex;gap:6px;margin-bottom:12px}
 .tabs button{border-radius:999px;padding:7px 20px;font-size:13.5px}
 .tabs button.on{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700}
+/* 설정 막대 접기 — 접어도 탭 줄의 이 단추는 남는다 */
+.tabs .fold{margin-left:auto;border-radius:6px;padding:6px 12px;font-size:12.5px;color:var(--muted)}
+.bar.folded{display:none}
 .chip{display:inline-block;font-size:11.5px;padding:2px 8px;border-radius:999px;
   background:#eceae5;color:var(--muted);white-space:nowrap}
 .chip.b{background:var(--accent);color:#fff}
@@ -128,16 +131,21 @@ details.more .body{margin-top:8px;padding:12px 14px;background:#faf9f6;border:1p
 /* 헌법 앱 .type-target 과 같은 글꼴·크기 (font-family 는 body 를 물려받는다) */
 .tp{font-size:20px;line-height:2.1;
   letter-spacing:.02em;white-space:pre-wrap;word-break:break-all}
-.tp .done{color:#a9a59d}
+/* 친 줄 · 칠 줄 · 입력칸 · 다음 줄 순으로 쌓는다 — 입력칸이 칠 줄 바로 밑에 붙어야
+   눈이 위아래로 오가지 않는다. 다음 줄은 입력칸 밑에서 미리 보여 준다. */
+.tp.done,.tp .done{color:#a9a59d}
 .tp .cur{background:var(--cur);border-radius:4px;padding:3px 5px;display:block;margin:2px 0}
-.tp .nxt{color:#b4b0a8}
+.tp.nxt,.tp .nxt{color:#b4b0a8}
+.tp.nxt{margin-top:8px;padding:0 5px}
+.tp.done{padding:0 5px}
+.tp:empty{display:none}
 .tp .c-ok{color:var(--ok)}
 .tp .c-bad{color:#fff;background:var(--bad);border-radius:2px}
 .tp .c-now{border-bottom:2px solid var(--accent)}
 .tp .c-todo{color:var(--ink)}
 .tinput{width:100%;font:inherit;font-size:18px;
   padding:12px 14px;border:2px solid var(--accent);border-radius:8px;background:#fffef9;color:var(--ink);
-  letter-spacing:.02em;margin-top:10px}
+  letter-spacing:.02em;margin-top:4px}
 .tinput:focus{outline:none;box-shadow:0 0 0 3px rgba(47,72,88,.15)}
 .gauge{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-end;margin-top:14px}
 .gauge div{text-align:center}
@@ -155,15 +163,16 @@ details.more .body{margin-top:8px;padding:12px 14px;background:#faf9f6;border:1p
 <header>
   <h1>형재실 링판 · 법리 암기 & 타자연습</h1>
   <span class="sub">2025 전북대 형재실 판례정리(링판) 법리 원문 · 기호 정제 · 요약결론 제외</span>
-  <span class="ver" title="앱 버전 · 마지막 업데이트일"><b>v2.22</b> · 2026-09-27</span>
+  <span class="ver" title="앱 버전 · 마지막 업데이트일"><b>v2.33</b> · 2026-09-28</span>
 </header>
 
 <div class="tabs">
   <button id="tabMemo" class="on">암기 모드</button>
   <button id="tabType">타자 모드</button>
+  <button id="barFold" class="fold" aria-controls="setBar" aria-expanded="true">설정 접기 ▲</button>
 </div>
 
-<div class="bar">
+<div class="bar" id="setBar">
   <div class="row">
     <label class="f">범위
       <span class="stg" id="scp">
@@ -437,7 +446,7 @@ const P = {
   wrong: new Set(),        // 오답 카드ID — 통과하면 지운다
   drill: {},               // 카드ID → { best, n, stage, due }
   pos: 0,
-  settings: { hintPin:false, hintLv:0, stage:4 },
+  settings: { hintPin:false, hintLv:0, stage:4, barFold:false },
 };
 
 let MODE = 'memo';
@@ -566,6 +575,14 @@ function syncModeUI(){
   $('#tabType').classList.toggle('on', MODE === 'type');
   $('#wrongOnly').style.display = MODE === 'memo' ? '' : 'none';
 }
+/* 설정 막대 접기 — 접힌 상태는 진도와 함께 저장한다 */
+function syncFold(){
+  const f = !!P.settings.barFold;
+  $('#setBar').classList.toggle('folded', f);
+  $('#barFold').textContent = f ? '설정 펼치기 ▼' : '설정 접기 ▲';
+  $('#barFold').setAttribute('aria-expanded', String(!f));
+}
+$('#barFold').onclick = () => { P.settings.barFold = !P.settings.barFold; syncFold(); save(); };
 document.querySelectorAll('#stg button').forEach(b => b.onclick = () => {
   STAGE = +b.dataset.s; if ($('#fSeq').checked) seqStage = STAGE;
   resetHint(); syncModeUI(); if (MODE === 'memo'){ lastPos = -1; render(); }
@@ -877,6 +894,17 @@ function bindCloze(c){
          확정시키는 키라, 막으면 마지막 글자가 날아간다. 그 경우는 아래 input 에서
          들어온 공백을 걷어내는 쪽으로 처리한다. */
       if (e.key === ' ' && !e.isComposing && filled(el)){ e.preventDefault(); goNext(i); return; }
+      /* 빈 칸에서 백스페이스 — 앞 칸으로 되돌아간다. 이어 지울 수 있게 캐럿은 끝에 둔다
+         (focus 가 걸어 둔 전체선택을 풀어서, 한 번 더 누르면 한 글자씩 지워진다).
+         맨 앞 칸에서는 아무것도 하지 않는다 — 맨 뒤로 도는 것은 뜻밖이다. */
+      if (e.key === 'Backspace' && !e.isComposing && el.textContent === '' && i > 0){
+        e.preventDefault();
+        const p = bls[i-1];
+        p.focus();
+        const sel = window.getSelection();
+        sel.selectAllChildren(p); sel.collapseToEnd();
+        return;
+      }
       if (e.key === 'Enter'){
         e.preventDefault();
         if (e.ctrlKey || e.metaKey){ grade(); return; }
@@ -1123,8 +1151,10 @@ function renderType(){
     </div>
   </div>
   <div class="card">
+    <div class="tp done" id="tpPrev"></div>
     <div class="tp" id="tp"></div>
     <input class="tinput" id="ti" spellcheck="false" autocomplete="off" placeholder="위 노란 줄을 그대로 따라 치세요">
+    <div class="tp nxt" id="tpNext"></div>
     <div class="gauge">
       <div><div class="n" id="gKpm">0</div><div class="l">분당 타수</div></div>
       <div><div class="n" id="gAcc">100<span style="font-size:15px">%</span></div><div class="l">정확도</div></div>
@@ -1151,9 +1181,9 @@ function paintLines(typed, composing){
     else cur += `<span class="c-todo">${ch}</span>`;
   }
   if (n > line.length) cur += `<span class="c-bad">${esc(typed.slice(line.length))}</span>`;
-  const prev = tLine > 0 ? `<span class="done">${esc(tLines[tLine-1])}</span>\n` : '';
-  const next = tLine < tLines.length-1 ? `\n<span class="nxt">${esc(tLines[tLine+1])}</span>` : '';
-  tp.innerHTML = prev + `<span class="cur">${cur}</span>` + next;
+  tp.innerHTML = `<span class="cur">${cur}</span>`;
+  $('#tpPrev').textContent = tLine > 0 ? tLines[tLine-1] : '';
+  $('#tpNext').textContent = tLine < tLines.length-1 ? tLines[tLine+1] : '';
 }
 function bindType(c){
   bindKey(null);
@@ -1212,7 +1242,7 @@ function bindType(c){
   }
   clearInterval(tTimer);
   tTimer = setInterval(() => { if ($('#gTime')) tick(); else clearInterval(tTimer); }, 1000);
-  $('#tp').addEventListener('click', () => ti.focus());
+  ['#tpPrev','#tp','#tpNext'].forEach(s => $(s).addEventListener('click', () => ti.focus()));
 }
 function typeSummary(){
   const ms = tStat.started ? performance.now() - tStat.started : 0;
@@ -1265,6 +1295,7 @@ try {
 } catch(e){}
 hintLv = P.settings.hintPin ? Math.max(1, P.settings.hintLv || 1) : 0;
 syncModeUI();
+syncFold();
 refreshDueCount();
 setInterval(save, 4000);
 window.addEventListener('beforeunload', save);
